@@ -1,7 +1,5 @@
 #include <iostream>
-
-#include <stdio.h>
-#include <string.h>
+#include <tbb/task.h>
 
 #include "hdfs.h"
 
@@ -19,12 +17,22 @@ timespec timespec_diff(timespec start, timespec end) {
     return temp;
 }
 
+/**
+* TODO:
+*  - get Short circuit reads to work
+*  - use readzero reads (mmap)
+*/
 int main(int argc, char *argv[]) {
+    // Setup and parse options
     int n = 1;
-    const char *path = "/tmp/100M";
-    if(argc == 3) {
+    int concurrency = 1;
+    const char *path = "/tmp/1M";
+    size_t bufferSize = 1024;
+    bool useRz = true;
+    if(argc == 4) {
         path = argv[1];
         n = atoi(argv[2]);
+        bufferSize = atoi(argv[3]);
     }
 
     printf("Reading %s %i times\n", path, n);
@@ -43,22 +51,61 @@ int main(int argc, char *argv[]) {
     }
 
     tSize totalRead = 0;
-    for(int i=0; i<n; i++) {
-        hdfsSeek(fs, file, 0);
+    char *buffer = (char*)malloc(sizeof(char)*bufferSize);
 
-        char buffer[4096];
+    struct hadoopRzOptions *rzOptions;
+    struct hadoopRzBuffer *rzBuffer;
+    if(useRz) {
+        rzOptions = hadoopRzOptionsAlloc();
+
+        if(rzOptions == NULL) {
+            fprintf(stderr, "Failed to allocate zero read buffer\n");
+            exit(1);
+        }
+    }
+
+    for(int i=0; i<n; i++) {
         tSize read = 0;
         do {
-            read = hdfsRead(fs, file, buffer, 4096);
+            if(useRz) {
+                rzBuffer = hadoopReadZero(file, rzOptions, 0);
+                if(rzBuffer == NULL) {
+                    fprintf(stderr, "Failed to perform zero read for path %s (%i)\n", path, errno);
+                    exit(1);
+                }
+
+                const void *data = hadoopRzBufferGet(rzBuffer);
+
+                read += hadoopRzBufferLength(rzBuffer);
+                hadoopRzBufferFree(file, rzBuffer);
+            } else {
+                read = hdfsRead(fs, file, buffer, bufferSize);
+            }
+
             totalRead += read;
         } while (read > 0);
+
+        if(!useRz) {
+            //hdfsSeek(fs, file, 0);
+        }
     }
+
+    free(buffer);
 
     clock_gettime(CLOCK_MONOTONIC, &endTime);
     struct timespec time = timespec_diff(startTime, endTime);
 
     // TODO Should we use 2^10 or 1024 for KB, MB, GB?
-    printf("Read %f GB in %lf s\n", ((float)totalRead)/(1000.0*1000.0*1000.0), time.tv_sec + time.tv_nsec/1000000000.0);
+    printf("Read %f GB in %lfs with a buffer size of %i\n", ((float)totalRead)/(1000.0*1000.0*1000.0), time.tv_sec + time.tv_nsec/1000000000.0, (int)bufferSize);
+
+    struct hdfsReadStatistics *stats;
+    hdfsFileGetReadStatistics(file, &stats);
+    printf("Statistics:\n\tTotal: %lld\n\tLocal: %lld\n\tShort Circuit: %lld\n\tZero Read: %lld\n", stats->totalBytesRead, stats->totalLocalBytesRead, stats->totalShortCircuitBytesRead, stats->totalZeroCopyBytesRead);
+    hdfsFileFreeReadStatistics(stats);
+
+    if(rzOptions) {
+        hadoopRzOptionsFree(rzOptions);
+    }
 
     hdfsCloseFile(fs, file);
 }
