@@ -1,1 +1,10 @@
 .idea/
+*~
+
+cmake_install.cmake
+clion1
+build/
+benchmark_*
+CMakeCache.txt
+CMakeFiles
+Makefile
