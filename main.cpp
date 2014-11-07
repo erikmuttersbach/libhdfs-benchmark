@@ -1,10 +1,36 @@
-#include <iostream>
+#include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <tbb/tbb.h>
 #include <tbb/compat/thread>
+
+#ifdef LIBHDFS_HDFS_H
 #include <hdfs.h>
+#endif
+
+// On Mac OS X clock_gettime is not available
+#ifdef __MACH__
+#include <mach/mach_time.h>
+#define CLOCK_REALTIME 0
+#define CLOCK_MONOTONIC 0
+int clock_gettime(int clk_id, struct timespec *t){
+    mach_timebase_info_data_t timebase;
+    mach_timebase_info(&timebase);
+    uint64_t time;
+    time = mach_absolute_time();
+    double nseconds = ((double)time * (double)timebase.numer)/((double)timebase.denom);
+    double seconds = ((double)time * (double)timebase.numer)/((double)timebase.denom * 1e9);
+    t->tv_sec = seconds;
+    t->tv_nsec = nseconds;
+    return 0;
+}
+#else
+#include <time.h>
+#endif
 
 using namespace std;
 using namespace tbb;
@@ -33,6 +59,7 @@ void use_data(void *data, size_t length) {
     }
 }
 
+#ifdef LIBHDFS_HDFS_H
 bool read_hdfs_zcr(hdfsFS fs, hdfsFile file, hdfsFileInfo *fileInfo, int n, size_t buffer_size) {
     struct hadoopRzOptions *rzOptions;
     struct hadoopRzBuffer *rzBuffer;
@@ -113,6 +140,7 @@ bool read_hdfs_standard(hdfsFS fs, hdfsFile file, hdfsFileInfo *fileInfo, int n,
 
     g.wait();
 }
+#endif
 
 void read_file(const char *path, size_t file_size, int n, size_t buffer_size) {
     task_scheduler_init init(n);
@@ -129,7 +157,7 @@ void read_file(const char *path, size_t file_size, int n, size_t buffer_size) {
             fseek(file, chunk_offset, SEEK_SET);
 
             char *buffer = (char *) malloc(sizeof(char) * buffer_size);
-            tSize total_read = 0, read = 0;
+            size_t total_read = 0, read = 0;
             do {
                 if(total_read >= chunk_size) {
                     break;
@@ -226,6 +254,7 @@ int main(int argc, char *argv[]) {
 
     size_t file_size = 0;
     if(benchmark == benchmark_type::hdfs) {
+#ifdef LIBHDFS_HDFS_H
         // Connect to the HDFS instance and open the desired
         // file:
         // Note: using default,0 as parameters doesn't work
@@ -258,6 +287,9 @@ int main(int argc, char *argv[]) {
         hdfsFileFreeReadStatistics(stats);
 
         hdfsCloseFile(fs, file);
+#else
+        fprintf(stderr, "libhdfs missing\n");
+#endif
     } else {
         struct stat file_stat;
         stat(path, &file_stat);
