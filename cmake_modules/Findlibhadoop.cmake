@@ -23,11 +23,10 @@
 #  LIBHDFS_INCLUDE_DIR - the LIBHDFS include directory
 #  LIBHDFS_LIBRARIES - The libraries needed to use LIBHDFS
 
-if (NOT LIBHDFS_FOUND)
+if (NOT LIBHADOOP_FOUND)
     include(FindPackageHandleStandardArgs)
 
-    find_path(LIBHDFS_INCLUDE_DIR hdfs.h)
-    find_library(LIBHDFS_LIBRARY libhdfs)
+    find_library(LIBHADOOP_LIBRARY libhadoop PATHS /usr/local/hadoop/lib/native)
 
-    find_package_handle_standard_args(LIBHDFS DEFAULT_MSG LIBHDFS_INCLUDE_DIR LIBHDFS_LIBRARY)
+    find_package_handle_standard_args(LIBHDFS DEFAULT_MSG LIBHADOOP_LIBRARY)
 endif()
