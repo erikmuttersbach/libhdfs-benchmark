@@ -7,7 +7,7 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 
-#ifdef LIBHDFS_HDFS_H
+#ifdef LIBHDFS_FOUND
 #include <hdfs.h>
 #endif
 
@@ -221,7 +221,7 @@ int main(int argc, char *argv[]) {
 
     size_t file_size = 0;
     if(benchmark == benchmark_type::hdfs) {
-#ifdef LIBHDFS_HDFS_H
+#ifdef LIBHDFS_FOUND
         // Connect to the HDFS instance and open the desired
         // file:
         // Note: using default,0 as parameters doesn't work

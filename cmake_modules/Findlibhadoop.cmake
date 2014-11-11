@@ -26,7 +26,7 @@
 if (NOT LIBHADOOP_FOUND)
     include(FindPackageHandleStandardArgs)
 
-    find_library(LIBHADOOP_LIBRARY libhadoop PATHS /usr/local/hadoop/lib/native)
+    find_library(LIBHADOOP_LIBRARY hadoop PATHS /usr/local/hadoop/lib/native)
 
-    find_package_handle_standard_args(LIBHDFS DEFAULT_MSG LIBHADOOP_LIBRARY)
+    find_package_handle_standard_args(LIBHADOOP DEFAULT_MSG LIBHADOOP_LIBRARY)
 endif()
