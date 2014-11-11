@@ -56,7 +56,7 @@ void use_data(void *data, size_t length) {
 }
 
 #ifdef LIBHDFS_HDFS_H
-bool read_hdfs_zcr(hdfsFS fs, hdfsFile file, hdfsFileInfo *fileInfo size_t buffer_size) {
+bool read_hdfs_zcr(hdfsFS fs, hdfsFile file, hdfsFileInfo *fileInfo, size_t buffer_size) {
     struct hadoopRzOptions *rzOptions;
     struct hadoopRzBuffer *rzBuffer;
 
@@ -100,7 +100,7 @@ bool read_hdfs_zcr(hdfsFS fs, hdfsFile file, hdfsFileInfo *fileInfo size_t buffe
     return true;
 }
 
-bool read_hdfs_standard(hdfsFS fs, hdfsFile file, hdfsFileInfo *fileInfo, int n, size_t buffer_size) {
+bool read_hdfs_standard(hdfsFS fs, hdfsFile file, hdfsFileInfo *fileInfo, size_t buffer_size) {
     char *buffer = (char *) malloc(sizeof(char) * buffer_size);
     tSize total_read = 0, read = 0;
     do {
@@ -236,14 +236,14 @@ int main(int argc, char *argv[]) {
 
         // Try to perform a zero-copy read, if it fails
         // fall back to standard read
-        if (force_standard_read || !read_hdfs_zcr(fs, file, fileInfo, n, buffer_size)) {
+        if (force_standard_read || !read_hdfs_zcr(fs, file, fileInfo, buffer_size)) {
             if (force_standard_read) {
                 printf("Using standard read\n");
             } else {
                 printf("Falling back to standard read\n");
             }
 
-            read_hdfs_standard(fs, file, fileInfo, n, buffer_size);
+            read_hdfs_standard(fs, file, fileInfo, buffer_size);
         }
 
         file_size = fileInfo[0].mSize;
