@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
+#include <getopt.h>
 
 #ifdef LIBHDFS_FOUND
 #include <hdfs.h>
@@ -15,6 +16,8 @@
 // On Mac OS X clock_gettime is not available
 #ifdef __MACH__
 #include <mach/mach_time.h>
+//#include <Foundation/Foundation.h>
+
 #define CLOCK_REALTIME 0
 #define CLOCK_MONOTONIC 0
 int clock_gettime(int clk_id, struct timespec *t){
@@ -48,6 +51,27 @@ timespec timespec_diff(timespec start, timespec end) {
                                     fprintf(stderr, "%s failed: %s\n", func, strerror(errno)); \
                                     exit(1); \
                                 }
+
+#define EXPECT_NONNEGATIVE(r, func) if(r < 0) { \
+                                    fprintf(stderr, "%s failed: %s\n", func, strerror(errno)); \
+                                    exit(1); \
+                                }
+
+enum benchmark {
+    none = 0, hdfs, file_mmap, file_read
+};
+
+static const char *benchmark_s[] = {
+        "none", "hdfs", "file_mmap", "file_read"
+};
+
+struct {
+    const char *path = "/tmp/1000M";
+    size_t buffer_size = 4096;
+    int force_hdfs_standard_read = 0;
+
+    benchmark benchmark;
+} options;
 
 unsigned int use_data(void *data, size_t length) {
     // Slower:
@@ -132,8 +156,8 @@ bool read_hdfs_standard(hdfsFS fs, hdfsFile file, hdfsFileInfo *fileInfo, size_t
 }
 #endif
 
-void read_file(const char *path, size_t file_size, size_t buffer_size) {
-    FILE *file = fopen(path, "r");
+void read_file() {
+    FILE *file = fopen(options.path, "r");
     EXPECT_NONZERO(file, "fopen");
 
 #ifdef __linux__
@@ -143,10 +167,10 @@ void read_file(const char *path, size_t file_size, size_t buffer_size) {
     syscall(SYS_ioprio_set, getpid(), 1, 1);
 #endif
 
-    char *buffer = (char *) malloc(sizeof(char) * buffer_size);
+    char *buffer = (char *) malloc(sizeof(char) * options.buffer_size);
     size_t total_read = 0, read = 0;
     do {
-        read = fread(buffer, sizeof(char), buffer_size, file);
+        read = fread(buffer, sizeof(char), options.buffer_size, file);
         if (read > 0) {
             use_data(buffer, read);
         }
@@ -163,23 +187,27 @@ void read_file(const char *path, size_t file_size, size_t buffer_size) {
     fclose(file);
 }
 
-void read_file_mmap(const char *path, size_t file_size) {
-    int fd = open(path, O_RDONLY);
-    //EXPECT_NONZERO(fd, "fopen");
+void read_file_mmap() {
+    int fd = open(options.path, O_RDONLY);
+    EXPECT_NONNEGATIVE(fd, "open");
 
-    void *data = mmap(NULL, file_size, PROT_READ, MAP_SHARED, fd, 0);
+    struct stat file_stat;
+    stat(options.path, &file_stat);
+
+    void *data = mmap(NULL, file_stat.st_size, PROT_READ, MAP_SHARED, fd, 0);
     if(MAP_FAILED == data) {
         fprintf(stderr, "mmap failed: %s\n", strerror(errno));
         exit(1);
     }
 
 #ifdef __posix
-    posix_fadvise(file, 0, file_size, POSIX_FADV_SEQUENTIAL | POSIX_FADV_WILLNEED);
+    // TODO
+    //posix_madvise(file, 0, file_size, POSIX_FADV_SEQUENTIAL | POSIX_FADV_WILLNEED);
 #endif
 
-    use_data(data, file_size);
+    use_data(data, file_stat.st_size);
 
-    munmap(data, file_size);
+    munmap(data, file_stat.st_size);
     close(fd);
 }
 
@@ -187,9 +215,52 @@ void print_usage() {
     printf("Usage: hdfs_benchmark file_read|file_mmap|hdfs [path [buffer_size [force_hdfs_standard_read]]]\n");
 }
 
-typedef enum {
-    hdfs, file_mmap, file_read
-} benchmark_type;
+void parse_options(int argc, char *argv[]) {
+    static struct option options_config[] = {
+        {"force-hdfs-standard", no_argument, &options.force_hdfs_standard_read, 1},
+        {"file",    optional_argument, 0, 'f'},
+        {"buffer",  optional_argument, 0, 'b'},
+        {"type",    required_argument, 0, 't'},
+        {0, 0, 0, 0}
+    };
+
+    int c = 0;
+    while(c >= 0) {
+        int option_index;
+        c = getopt_long(argc, argv, "f:b:t:", options_config, &option_index);
+
+        switch(c) {
+            case 0:
+                //options.force_hdfs_standard_read =optarg;
+                break;
+            case 'f':
+                options.path = optarg;
+                break;
+            case 'b':
+                options.buffer_size = atoi(optarg);
+                break;
+            case 't':
+                if(strcmp(optarg, "hdfs") == 0) {
+                    options.benchmark = benchmark::hdfs;
+                } else if(strcmp(optarg, "file_mmap") == 0) {
+                    options.benchmark = benchmark::file_mmap;
+                } else if(strcmp(optarg, "file_read") == 0) {
+                    options.benchmark = benchmark::file_read;
+                } else {
+                    printf("%s is not a valid benchmark. Options are: hdfs, file_mmap, file_read\n", optarg);
+                    exit(1);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    if(options.benchmark == benchmark::none) {
+        printf("Please select a benchmark type\n");
+        exit(1);
+    }
+}
 
 /**
 * TODO:
@@ -197,11 +268,14 @@ typedef enum {
 *  - use readzero reads (mmap)
 */
 int main(int argc, char *argv[]) {
+    parse_options(argc, argv);
+
+    printf("Reading from %s using benchmark %s, buffer size %i, forcing standard HDFS read: %s\n", options.path, benchmark_s[options.benchmark], (int)options.buffer_size, options.force_hdfs_standard_read > 0 ? "yes" : "no");
+
+    exit(0);
+
     // Setup and parse options
-    const char *path = "/tmp/1000M";
-    size_t buffer_size = 4096;
-    bool force_standard_read = false;
-    benchmark_type benchmark;
+    /*benchmark_type benchmark;
     if (argc < 2) {
         print_usage();
         exit(1);
@@ -226,7 +300,7 @@ int main(int argc, char *argv[]) {
     }
     if (argc >= 5) {
         force_standard_read = (strcmp(argv[4], "std") == 0);
-    }
+    }*/
 
     // If we are root, we can clear the filesystem
     // cache
@@ -235,19 +309,17 @@ int main(int argc, char *argv[]) {
         printf("Cleared filesystem cache\n");
     }
 
-    printf("Reading %s from %s\n", path, benchmark == hdfs ? "HDFS" : (benchmark == file_mmap ? "file mmap" : " file read"));
-
     struct timespec startTime, openedTime, endTime;
     clock_gettime(CLOCK_MONOTONIC, &startTime);
 
     size_t file_size = 0;
-    if(benchmark == benchmark_type::hdfs) {
+    if(options.benchmark == benchmark::hdfs) {
 #ifdef LIBHDFS_FOUND
         // Connect to the HDFS instance and open the desired
         // file:
         // Note: using default,0 as parameters doesn't work
         hdfsFS fs = hdfsConnect("127.0.0.1", 9000);
-        hdfsFileInfo *fileInfo = hdfsGetPathInfo(fs, path);
+        hdfsFileInfo *fileInfo = hdfsGetPathInfo(fs, options.path);
 
         hdfsFile file = hdfsOpenFile(fs, path, O_RDONLY, 4096, 0, 0);
         EXPECT_NONZERO(file, "hdfsOpenFile")
@@ -257,14 +329,14 @@ int main(int argc, char *argv[]) {
 
         // Try to perform a zero-copy read, if it fails
         // fall back to standard read
-        if (force_standard_read || !read_hdfs_zcr(fs, file, fileInfo, buffer_size)) {
-            if (force_standard_read) {
+        if (force_standard_read || !read_hdfs_zcr(fs, file, fileInfo)) {
+            if (options.force_hdfs_standard_read) {
                 printf("Using standard read\n");
             } else {
                 printf("Falling back to standard read\n");
             }
 
-            read_hdfs_standard(fs, file, fileInfo, buffer_size);
+            read_hdfs_standard(fs, file, fileInfo);
         }
 
         file_size = fileInfo[0].mSize;
@@ -280,13 +352,13 @@ int main(int argc, char *argv[]) {
 #endif
     } else {
         struct stat file_stat;
-        stat(path, &file_stat);
+        stat(options.path, &file_stat);
         file_size = file_stat.st_size;
 
-        if(benchmark == benchmark_type::file_read) {
-            read_file(path, file_size, buffer_size);
+        if(options.benchmark == benchmark::file_read) {
+            read_file();
         } else {
-            read_file_mmap(path, file_size);
+            read_file_mmap();
         }
 
     }
