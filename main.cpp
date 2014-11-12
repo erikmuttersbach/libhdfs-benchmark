@@ -292,11 +292,6 @@ void parse_options(int argc, char *argv[]) {
     }
 }
 
-/**
-* TODO:
-*  - get Short circuit reads to work
-*  - use readzero reads (mmap)
-*/
 int main(int argc, char *argv[]) {
     parse_options(argc, argv);
 
@@ -304,10 +299,12 @@ int main(int argc, char *argv[]) {
 
     // If we are root, we can clear the filesystem
     // cache
+#ifdef __linux__
     if(getuid() == 0) {
         system("sudo sync; sudo echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null");
         printf("Cleared filesystem cache\n");
     }
+#endif
 
     struct timespec startTime, openedTime, endTime;
     clock_gettime(CLOCK_MONOTONIC, &startTime);
