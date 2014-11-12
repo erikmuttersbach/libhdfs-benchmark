@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <sys/syscall.h>
 
 #ifdef LIBHDFS_FOUND
 #include <hdfs.h>
@@ -48,11 +49,21 @@ timespec timespec_diff(timespec start, timespec end) {
                                     exit(1); \
                                 }
 
-void use_data(void *data, size_t length) {
-    volatile int c = 0;
+unsigned int use_data(void *data, size_t length) {
+    // Slower:
+    /*
+    int c = 0;
+    for (size_t i = 0; i < length; i++) {
+        if(1 == *((char *) data + i)) {
+            c++;
+        }
+    }
+     */
+    volatile unsigned int c = 0;
     for (size_t i = 0; i < length; i++) {
         c += *((char *) data + i);
     }
+    return c;
 }
 
 #ifdef LIBHDFS_HDFS_H
@@ -125,8 +136,11 @@ void read_file(const char *path, size_t file_size, size_t buffer_size) {
     FILE *file = fopen(path, "r");
     EXPECT_NONZERO(file, "fopen");
 
-#ifdef __posix
-    posix_fadvise(file, 0, file_size, POSIX_FADV_SEQUENTIAL);
+#ifdef __linux__
+    //posix_fadvise(fileno(file), 0, file_size, POSIX_FADV_SEQUENTIAL | POSIX_FADV_WILLNEED);
+    //readahead(fileno(file), 0, file_size);
+
+    syscall(SYS_ioprio_set, getpid(), 1, 1);
 #endif
 
     char *buffer = (char *) malloc(sizeof(char) * buffer_size);
@@ -159,6 +173,10 @@ void read_file_mmap(const char *path, size_t file_size) {
         exit(1);
     }
 
+#ifdef __posix
+    posix_fadvise(file, 0, file_size, POSIX_FADV_SEQUENTIAL | POSIX_FADV_WILLNEED);
+#endif
+
     use_data(data, file_size);
 
     munmap(data, file_size);
@@ -177,10 +195,6 @@ typedef enum {
 * TODO:
 *  - get Short circuit reads to work
 *  - use readzero reads (mmap)
-*  Usage:
-*  - use posix_fadvise() to avoi caching
-*  - mmap should be sequential
-*  - remove threading again
 */
 int main(int argc, char *argv[]) {
     // Setup and parse options
@@ -212,6 +226,13 @@ int main(int argc, char *argv[]) {
     }
     if (argc >= 5) {
         force_standard_read = (strcmp(argv[4], "std") == 0);
+    }
+
+    // If we are root, we can clear the filesystem
+    // cache
+    if(getuid() == 0) {
+        system("sudo sync; sudo echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null");
+        printf("Cleared filesystem cache\n");
     }
 
     printf("Reading %s from %s\n", path, benchmark == hdfs ? "HDFS" : (benchmark == file_mmap ? "file mmap" : " file read"));

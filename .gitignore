@@ -8,3 +8,5 @@ benchmark_*
 CMakeCache.txt
 CMakeFiles
 Makefile
+benchmark.csv
+

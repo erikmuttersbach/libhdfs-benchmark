@@ -40,7 +40,7 @@ options = ARGV[1..ARGV.count-1].map do |arg|
   end
 end
 
-File.open('benchmark_'+options.map{|o|o.join(',').gsub('/', '')}.join('_')+'.csv', 'w') do |f|
+File.open('benchmark.csv', 'w') do |f|
   combine [], options do |params|
     print "Running #{params.join(',')}\n"
     
