@@ -79,7 +79,13 @@ struct {
     benchmark benchmark;
 } options;
 
-unsigned int use_data(void *data, size_t length) {
+/**
+* Makes sure the data is actually "touched", e.g. loaded
+* in memory.
+*
+* @see http://stackoverflow.com/questions/26871638/how-to-prevent-the-compiler-from-optimizing-memory-access-to-benchmark-read-vs?noredirect=1#comment42312199_26871638
+*/
+uint64_t use_data(void *data, size_t length) {
     // Slower:
     /*
     int c = 0;
@@ -89,11 +95,13 @@ unsigned int use_data(void *data, size_t length) {
         }
     }
      */
-    volatile unsigned int c = 0;
+    volatile uint64_t temp = 0;
+    uint64_t sum = 0;
     for (size_t i = 0; i < length; i++) {
-        c += *((char *) data + i);
+        sum += *((char *) data + i);
     }
-    return c;
+    temp = sum;
+    return temp;
 }
 
 #ifdef LIBHDFS_HDFS_H
