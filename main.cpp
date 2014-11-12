@@ -230,9 +230,6 @@ void parse_options(int argc, char *argv[]) {
         c = getopt_long(argc, argv, "f:b:t:", options_config, &option_index);
 
         switch(c) {
-            case 0:
-                //options.force_hdfs_standard_read =optarg;
-                break;
             case 'f':
                 options.path = optarg;
                 break;
