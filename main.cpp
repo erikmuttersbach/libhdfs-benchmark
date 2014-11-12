@@ -70,6 +70,12 @@ struct {
     size_t buffer_size = 4096;
     int force_hdfs_standard_read = 0;
 
+    // Linux specific improvements
+    int advise_willneed = false;
+    int advise_sequential = false;
+    int use_readahead = false;
+    int use_ioprio = false;
+
     benchmark benchmark;
 } options;
 
@@ -161,10 +167,17 @@ void read_file() {
     EXPECT_NONZERO(file, "fopen");
 
 #ifdef __linux__
-    //posix_fadvise(fileno(file), 0, file_size, POSIX_FADV_SEQUENTIAL | POSIX_FADV_WILLNEED);
-    //readahead(fileno(file), 0, file_size);
+    if(options.advise_willneed || options.advise_sequential) {
+        posix_fadvise(fileno(file), 0, file_size, options.advise_sequential ? POSIX_FADV_SEQUENTIAL : POSIX_FADV_WILLNEED);
+    }
 
-    syscall(SYS_ioprio_set, getpid(), 1, 1);
+    if(options.use_readahead) {
+        readahead(fileno(file), 0, file_size);
+    }
+
+    if(options.use_ioprio) {
+        syscall(SYS_ioprio_set, getpid(), 1, 1);
+    }
 #endif
 
     char *buffer = (char *) malloc(sizeof(char) * options.buffer_size);
@@ -200,9 +213,14 @@ void read_file_mmap() {
         exit(1);
     }
 
-#ifdef __posix
-    // TODO
-    //posix_madvise(file, 0, file_size, POSIX_FADV_SEQUENTIAL | POSIX_FADV_WILLNEED);
+#ifdef __linux__
+    if(options.advise_willneed || options.advise_sequential) {
+        posix_madvise(data, file_stat.st_size, options.advise_sequential ? POSIX_MADV_SEQUENTIAL : POSIX_MADV_WILLNEED);
+    }
+
+    if(options.use_ioprio) {
+        syscall(SYS_ioprio_set, getpid(), 1, 1);
+    }
 #endif
 
     use_data(data, file_stat.st_size);
@@ -211,17 +229,26 @@ void read_file_mmap() {
     close(fd);
 }
 
-void print_usage() {
-    printf("Usage: hdfs_benchmark file_read|file_mmap|hdfs [path [buffer_size [force_hdfs_standard_read]]]\n");
+void print_usage(int argc, char *argv[]) {
+    printf("Usage: %s -t file_read|file_mmap|hdfs\n", argv[0]);
+    printf("\t-f FILE\n");
+    printf("\t-b BUFFER_SIZE\n");
+    printf("\t-t BENCHMARK_TYPE\n");
 }
 
 void parse_options(int argc, char *argv[]) {
     static struct option options_config[] = {
-        {"force-hdfs-standard", no_argument, &options.force_hdfs_standard_read, 1},
-        {"file",    optional_argument, 0, 'f'},
-        {"buffer",  optional_argument, 0, 'b'},
-        {"type",    required_argument, 0, 't'},
-        {0, 0, 0, 0}
+            {"force-hdfs-standard", no_argument, &options.force_hdfs_standard_read, 1},
+#ifdef __linux__
+            {"advise-sequential",   no_argument, &options.advise_sequential, 1},
+            {"advise-willneed",     no_argument, &options.advise_willneed, 1},
+            {"use-readahead",       no_argument, &options.use_readahead, 1},
+            {"use-ioprio",          no_argument, &options.use_ioprio, 1},
+#endif
+            {"file",    optional_argument, 0, 'f'},
+            {"buffer",  optional_argument, 0, 'b'},
+            {"type",    required_argument, 0, 't'},
+            {0, 0, 0, 0}
     };
 
     int c = 0;
@@ -254,7 +281,13 @@ void parse_options(int argc, char *argv[]) {
     }
 
     if(options.benchmark == benchmark::none) {
+        print_usage(argc, argv);
         printf("Please select a benchmark type\n");
+        exit(1);
+    }
+
+    if(options.advise_willneed && options.advise_sequential) {
+        printf("Options --advise-willneed and --advise-sequential are exclusive\n");
         exit(1);
     }
 }
@@ -268,36 +301,6 @@ int main(int argc, char *argv[]) {
     parse_options(argc, argv);
 
     printf("Reading from %s using benchmark %s, buffer size %i, forcing standard HDFS read: %s\n", options.path, benchmark_s[options.benchmark], (int)options.buffer_size, options.force_hdfs_standard_read > 0 ? "yes" : "no");
-
-    exit(0);
-
-    // Setup and parse options
-    /*benchmark_type benchmark;
-    if (argc < 2) {
-        print_usage();
-        exit(1);
-    } else {
-        if(strcmp(argv[1], "hdfs") == 0) {
-            benchmark = benchmark_type::hdfs;
-        } else if(strcmp(argv[1], "file_read") == 0) {
-            benchmark = benchmark_type::file_read;
-        } else if(strcmp(argv[1], "file_mmap") == 0) {
-            benchmark = benchmark_type::file_mmap;
-        } else {
-            print_usage();
-            exit(1);
-        }
-    }
-
-    if (argc >= 3) {
-        path = argv[2];
-    }
-    if (argc >= 4) {
-        buffer_size = atoi(argv[3]);
-    }
-    if (argc >= 5) {
-        force_standard_read = (strcmp(argv[4], "std") == 0);
-    }*/
 
     // If we are root, we can clear the filesystem
     // cache
