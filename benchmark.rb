@@ -41,12 +41,11 @@ options = ARGV[1..ARGV.count-1].map do |arg|
 end
 
 File.open('benchmark.csv', 'w') do |f|
-  combine [], options do |params|
-    print "Running #{params.join(',')}\n"
-    
+  combine [], options do |params|    
     for i in 1..n do 
+      print "Running (#{i}): #{params.join(' ')}\n"
       f.write params.join(',')
-      out = `#{ARGV[0]} #{params.join(' ')}`
+      out = `/bin/bash -c "source init-env.sh; #{ARGV[0]} #{params.join(' ')}"`
       time = out.split("\n").last
       f.write ",#{time}\n"
     end

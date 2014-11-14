@@ -57,7 +57,7 @@ timespec timespec_diff(timespec start, timespec end) {
                                     exit(1); \
                                 }
 
-enum benchmark {
+enum benchmark_t {
     none = 0, hdfs, file_mmap, file_read
 };
 
@@ -76,7 +76,7 @@ struct {
     int use_readahead = false;
     int use_ioprio = false;
 
-    benchmark benchmark;
+    benchmark_t benchmark;
 } options;
 
 /**
@@ -105,7 +105,7 @@ uint64_t use_data(void *data, size_t length) {
 }
 
 #ifdef LIBHDFS_HDFS_H
-bool read_hdfs_zcr(hdfsFS fs, hdfsFile file, hdfsFileInfo *fileInfo, size_t buffer_size) {
+bool read_hdfs_zcr(hdfsFS fs, hdfsFile file, hdfsFileInfo *fileInfo) {
     struct hadoopRzOptions *rzOptions;
     struct hadoopRzBuffer *rzBuffer;
 
@@ -113,12 +113,12 @@ bool read_hdfs_zcr(hdfsFS fs, hdfsFile file, hdfsFileInfo *fileInfo, size_t buff
     rzOptions = hadoopRzOptionsAlloc();
     EXPECT_NONZERO(rzOptions, "hadoopRzOptionsAlloc")
 
-    hadoopRzOptionsSetSkipChecksum(rzOptions, true); // TODO Play with this parameter
+    //hadoopRzOptionsSetSkipChecksum(rzOptions, true);
     hadoopRzOptionsSetByteBufferPool(rzOptions, ELASTIC_BYTE_BUFFER_POOL_CLASS);
 
     size_t total_read = 0, read = 0;
     do {
-        rzBuffer = hadoopReadZero(file, rzOptions, buffer_size);
+        rzBuffer = hadoopReadZero(file, rzOptions, options.buffer_size);
         if (rzBuffer != NULL) {
             const void *data = hadoopRzBufferGet(rzBuffer);
             read = hadoopRzBufferLength(rzBuffer);
@@ -149,11 +149,11 @@ bool read_hdfs_zcr(hdfsFS fs, hdfsFile file, hdfsFileInfo *fileInfo, size_t buff
     return true;
 }
 
-bool read_hdfs_standard(hdfsFS fs, hdfsFile file, hdfsFileInfo *fileInfo, size_t buffer_size) {
-    char *buffer = (char *) malloc(sizeof(char) * buffer_size);
+bool read_hdfs_standard(hdfsFS fs, hdfsFile file, hdfsFileInfo *fileInfo) {
+    char *buffer = (char *) malloc(sizeof(char) * options.buffer_size);
     tSize total_read = 0, read = 0;
     do {
-        read = hdfsRead(fs, file, buffer, buffer_size);
+        read = hdfsRead(fs, file, buffer, options.buffer_size);
         if (read > 0) {
             use_data(buffer, read);
         }
@@ -175,12 +175,15 @@ void read_file() {
     EXPECT_NONZERO(file, "fopen");
 
 #ifdef __linux__
+    struct stat file_stat;
+    stat(options.path, &file_stat);
+
     if(options.advise_willneed || options.advise_sequential) {
-        posix_fadvise(fileno(file), 0, file_size, options.advise_sequential ? POSIX_FADV_SEQUENTIAL : POSIX_FADV_WILLNEED);
+        posix_fadvise(fileno(file), 0, file_stat.st_size, options.advise_sequential ? POSIX_FADV_SEQUENTIAL : POSIX_FADV_WILLNEED);
     }
 
     if(options.use_readahead) {
-        readahead(fileno(file), 0, file_size);
+        readahead(fileno(file), 0, file_stat.st_size);
     }
 
     if(options.use_ioprio) {
@@ -273,11 +276,11 @@ void parse_options(int argc, char *argv[]) {
                 break;
             case 't':
                 if(strcmp(optarg, "hdfs") == 0) {
-                    options.benchmark = benchmark::hdfs;
+                    options.benchmark = benchmark_t::hdfs;
                 } else if(strcmp(optarg, "file_mmap") == 0) {
-                    options.benchmark = benchmark::file_mmap;
+                    options.benchmark = benchmark_t::file_mmap;
                 } else if(strcmp(optarg, "file_read") == 0) {
-                    options.benchmark = benchmark::file_read;
+                    options.benchmark = benchmark_t::file_read;
                 } else {
                     printf("%s is not a valid benchmark. Options are: hdfs, file_mmap, file_read\n", optarg);
                     exit(1);
@@ -288,7 +291,7 @@ void parse_options(int argc, char *argv[]) {
         }
     }
 
-    if(options.benchmark == benchmark::none) {
+    if(options.benchmark == benchmark_t::none) {
         print_usage(argc, argv);
         printf("Please select a benchmark type\n");
         exit(1);
@@ -318,29 +321,44 @@ int main(int argc, char *argv[]) {
     clock_gettime(CLOCK_MONOTONIC, &startTime);
 
     size_t file_size = 0;
-    if(options.benchmark == benchmark::hdfs) {
+    if(options.benchmark == benchmark_t::hdfs) {
 #ifdef LIBHDFS_FOUND
         // Connect to the HDFS instance and open the desired
         // file:
         // Note: using default,0 as parameters doesn't work
-        hdfsFS fs = hdfsConnect("127.0.0.1", 9000);
+        struct hdfsBuilder *hdfsBuilder = hdfsNewBuilder();
+        hdfsBuilderSetNameNode(hdfsBuilder, "127.0.0.1");
+        hdfsBuilderSetNameNodePort(hdfsBuilder, 9000);
+        hdfsBuilderConfSetStr(hdfsBuilder, "dfs.client.read.shortcircuit", "true");
+        hdfsBuilderConfSetStr(hdfsBuilder, "dfs.domain.socket.path", "/usr/local/hadoop/var/dn_socket");
+        hdfsBuilderConfSetStr(hdfsBuilder, "dfs.client.domain.socket.data.traffic", "true");
+
+        char *buffer_size_s = new char[32];
+        sprintf(buffer_size_s, "%i", (int)options.buffer_size);
+        hdfsBuilderConfSetStr(hdfsBuilder, "dfs.client.read.shortcircuit.streams.cache.size", buffer_size_s);
+
+        hdfsFS fs = hdfsBuilderConnect(hdfsBuilder);
         hdfsFileInfo *fileInfo = hdfsGetPathInfo(fs, options.path);
 
-        hdfsFile file = hdfsOpenFile(fs, path, O_RDONLY, 4096, 0, 0);
+        hdfsFile file = hdfsOpenFile(fs, options.path, O_RDONLY, options.buffer_size, 0, 0);
         EXPECT_NONZERO(file, "hdfsOpenFile")
+
+        /*if(hdfsFileUsesDirectRead(file)) {
+            printf("File supports direct read\n");
+        } else {
+            printf("File does NOT support direct read\n");
+        }*/
 
         // measure latency to open the file
         clock_gettime(CLOCK_MONOTONIC, &openedTime);
 
         // Try to perform a zero-copy read, if it fails
         // fall back to standard read
-        if (force_standard_read || !read_hdfs_zcr(fs, file, fileInfo)) {
-            if (options.force_hdfs_standard_read) {
-                printf("Using standard read\n");
-            } else {
-                printf("Falling back to standard read\n");
-            }
-
+        if (options.force_hdfs_standard_read) {
+            printf("Using standard read\n");
+            read_hdfs_standard(fs, file, fileInfo);
+        } else if(!read_hdfs_zcr(fs, file, fileInfo)) {
+            printf("Falling back to standard read\n");
             read_hdfs_standard(fs, file, fileInfo);
         }
 
@@ -348,7 +366,7 @@ int main(int argc, char *argv[]) {
 
         struct hdfsReadStatistics *stats;
         hdfsFileGetReadStatistics(file, &stats);
-        printf("Statistics:\n\tTotal: %lu\n\tLocal: %lu\n\tShort Circuit: %lu\n\tZero Read: %lu\n", stats->totalBytesRead, stats->totalLocalBytesRead, stats->totalShortCircuitBytesRead, stats->totalZeroCopyBytesRead);
+        printf("Statistics:\n\tTotal: %lu\n\tLocal: %lu\n\tShort Circuit: %lu\n\tZero Copy Read: %lu\n", stats->totalBytesRead, stats->totalLocalBytesRead, stats->totalShortCircuitBytesRead, stats->totalZeroCopyBytesRead);
         hdfsFileFreeReadStatistics(stats);
 
         hdfsCloseFile(fs, file);
@@ -360,7 +378,7 @@ int main(int argc, char *argv[]) {
         stat(options.path, &file_stat);
         file_size = file_stat.st_size;
 
-        if(options.benchmark == benchmark::file_read) {
+        if(options.benchmark == benchmark_t::file_read) {
             read_file();
         } else {
             read_file_mmap();
