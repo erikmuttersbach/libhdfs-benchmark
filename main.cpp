@@ -33,6 +33,9 @@ int clock_gettime(int clk_id, struct timespec *t){
 }
 #else
 #include <time.h>
+#include <stddef.h>
+#include <sys/param.h>
+
 #endif
 
 timespec timespec_diff(timespec start, timespec end) {
@@ -68,7 +71,10 @@ static const char *benchmark_s[] = {
 struct {
     const char *path = "/tmp/1000M";
     size_t buffer_size = 4096;
+
+    // hdfs-sprecific settings
     int force_hdfs_standard_read = 0;
+    int use_hdfs_pread = false;
 
     // Linux specific improvements
     int advise_willneed = false;
@@ -95,13 +101,29 @@ uint64_t use_data(void *data, size_t length) {
         }
     }
      */
-    volatile uint64_t temp = 0;
+
+    /*volatile uint64_t temp = 0;
     uint64_t sum = 0;
     for (size_t i = 0; i < length; i++) {
         sum += *((char *) data + i);
     }
     temp = sum;
-    return temp;
+    return temp;*/
+
+    static void *buffer = NULL;
+    if(buffer == NULL) {
+        buffer = malloc(options.buffer_size);
+        if((size_t)buffer == -1) {
+            printf("ERROR: malloc failed\n");
+            exit(1);
+        }
+
+        // TODO shouldbe free'd
+    }
+
+    for(size_t i=0; i<length; i+=options.buffer_size) {
+        memcpy(buffer, data+i, MIN(options.buffer_size, length-i));
+    }
 }
 
 #ifdef LIBHDFS_HDFS_H
@@ -153,7 +175,12 @@ bool read_hdfs_standard(hdfsFS fs, hdfsFile file, hdfsFileInfo *fileInfo) {
     char *buffer = (char *) malloc(sizeof(char) * options.buffer_size);
     tSize total_read = 0, read = 0;
     do {
-        read = hdfsRead(fs, file, buffer, options.buffer_size);
+        if(options.use_hdfs_pread) {
+            read = hdfsPread(fs, file, total_read, buffer, options.buffer_size);
+        } else {
+            read = hdfsRead(fs, file, buffer, options.buffer_size);
+        }
+
         if (read > 0) {
             use_data(buffer, read);
         }
@@ -218,7 +245,7 @@ void read_file_mmap() {
     struct stat file_stat;
     stat(options.path, &file_stat);
 
-    void *data = mmap(NULL, file_stat.st_size, PROT_READ, MAP_SHARED, fd, 0);
+    void *data = mmap(NULL, file_stat.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     if(MAP_FAILED == data) {
         fprintf(stderr, "mmap failed: %s\n", strerror(errno));
         exit(1);
@@ -250,6 +277,7 @@ void print_usage(int argc, char *argv[]) {
 void parse_options(int argc, char *argv[]) {
     static struct option options_config[] = {
             {"force-hdfs-standard", no_argument, &options.force_hdfs_standard_read, 1},
+            {"use-hdfs-pread", no_argument, &options.use_hdfs_pread, 1},
 #ifdef __linux__
             {"advise-sequential",   no_argument, &options.advise_sequential, 1},
             {"advise-willneed",     no_argument, &options.advise_willneed, 1},
@@ -343,12 +371,6 @@ int main(int argc, char *argv[]) {
         hdfsFile file = hdfsOpenFile(fs, options.path, O_RDONLY, options.buffer_size, 0, 0);
         EXPECT_NONZERO(file, "hdfsOpenFile")
 
-        /*if(hdfsFileUsesDirectRead(file)) {
-            printf("File supports direct read\n");
-        } else {
-            printf("File does NOT support direct read\n");
-        }*/
-
         // measure latency to open the file
         clock_gettime(CLOCK_MONOTONIC, &openedTime);
 
@@ -378,6 +400,8 @@ int main(int argc, char *argv[]) {
         stat(options.path, &file_stat);
         file_size = file_stat.st_size;
 
+        clock_gettime(CLOCK_MONOTONIC, &openedTime);
+
         if(options.benchmark == benchmark_t::file_read) {
             read_file();
         } else {
@@ -388,7 +412,7 @@ int main(int argc, char *argv[]) {
 
     // Measure the final time
     clock_gettime(CLOCK_MONOTONIC, &endTime);
-    struct timespec time = timespec_diff(startTime, endTime);
+    struct timespec time = timespec_diff(openedTime, endTime);
     double speed = (((double) file_size) / ((double) time.tv_sec + time.tv_nsec / 1000000000.0)) / (1024.0 * 1024.0);
 
     // Print some text, some parseable results
