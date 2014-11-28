@@ -115,16 +115,14 @@ uint64_t use_data(void *data, size_t length) {
         }
     }
      */
-
-    /*volatile uint64_t temp = 0;
+   
     uint64_t sum = 0;
     for (size_t i = 0; i < length; i++) {
         sum += *((char *) data + i);
     }
-    temp = sum;
-    return temp;*/
+    return sum;
 
-    static void *buffer = NULL;
+    /*static void *buffer = NULL;
     if(buffer == NULL) {
         buffer = malloc(options.buffer_size);
         if((size_t)buffer == -1) {
@@ -137,7 +135,7 @@ uint64_t use_data(void *data, size_t length) {
 
     for(size_t i=0; i<length; i+=options.buffer_size) {
         memcpy(buffer, ((char*)data)+i, MIN(options.buffer_size, length-i));
-    }
+    }*/
 
     return 0;
 }
