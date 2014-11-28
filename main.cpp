@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -43,8 +44,10 @@ int clock_gettime(int clk_id, struct timespec *t){
 #include <sys/param.h>
 #endif
 
+#ifndef MIN
 #define MAX(a,b) ((a) > (b) ? a : b)
 #define MIN(a,b) ((a) < (b) ? a : b)
+#endif 
 
 timespec timespec_diff(timespec start, timespec end) {
     timespec temp;

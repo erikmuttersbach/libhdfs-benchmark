@@ -28,3 +28,5 @@ find_package (libhadoop)
 if (LIBHADOOP_FOUND)
     target_link_libraries(hdfs_benchmark ${LIBHADOOP_LIBRARY})
 endif (LIBHADOOP_FOUND)
+
+target_link_libraries(hdfs_benchmark uuid)
