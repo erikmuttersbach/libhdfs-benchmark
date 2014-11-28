@@ -8,8 +8,8 @@ project(hdfs_benchmark)
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake_modules")
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3")
-set(CMAKE_C_FLAGS_RELEASE "-O3")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native")
+set(CMAKE_C_FLAGS_RELEASE "-O3 -march=native")
 
 set(CMAKE_BUILD_TYPE Release)
 
