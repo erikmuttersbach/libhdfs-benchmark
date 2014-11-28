@@ -22,6 +22,5 @@ If you run the benchmark as root, e.g. with sudo, the file system cache will be 
 
 `$ dd if=/dev/zero of=tempfile bs=1M count=1024 conv=fdatasync,notrunc`
 `$ echo 3 | sudo tee /proc/sys/vm/drop_caches`
-`$ dd if=tempfile of=/dev/null bs=1M count=1024`
-`$ dd if=tempfile of=/dev/null bs=1M count=1024`
+`$ dd if=tempfile of=/dev/null bs=1M count=1024 conv=fdatasync,notrunc`
 
