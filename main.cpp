@@ -16,7 +16,6 @@
 // On Mac OS X clock_gettime is not available
 #ifdef __MACH__
 #include <mach/mach_time.h>
-//#include <Foundation/Foundation.h>
 
 #define CLOCK_REALTIME 0
 #define CLOCK_MONOTONIC 0
@@ -35,8 +34,10 @@ int clock_gettime(int clk_id, struct timespec *t){
 #include <time.h>
 #include <stddef.h>
 #include <sys/param.h>
-
 #endif
+
+#define MAX(a,b) ((a) > (b) ? a : b)
+#define MIN(a,b) ((a) < (b) ? a : b)
 
 timespec timespec_diff(timespec start, timespec end) {
     timespec temp;
@@ -122,8 +123,10 @@ uint64_t use_data(void *data, size_t length) {
     }
 
     for(size_t i=0; i<length; i+=options.buffer_size) {
-        memcpy(buffer, data+i, MIN(options.buffer_size, length-i));
+        memcpy(buffer, ((char*)data)+i, MIN(options.buffer_size, length-i));
     }
+
+    return 0;
 }
 
 #ifdef LIBHDFS_HDFS_H
