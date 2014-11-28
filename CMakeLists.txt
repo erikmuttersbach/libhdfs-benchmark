@@ -1,8 +1,11 @@
 cmake_minimum_required(VERSION 2.8.4)
 project(hdfs_benchmark)
 
-set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake_modules")
+# TODO Remove
+set(LIBHDFS_INCLUDE_DIR "/usr/local/include/hdfs")
+set(LIBHDFS_LIBRARY "/usr/local/lib/libhdfs3.so")
 
+set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake_modules")
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 

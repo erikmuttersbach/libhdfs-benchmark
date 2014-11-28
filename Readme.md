@@ -1,5 +1,15 @@
 # HDFS Benchmark
 
+## Compiling
+
+In order to be able to run libhdfs benchmarks, specify the include directory and the library path when compiling: 
+
+`$ cd libhdfs-benchmark`
+`$ mkdir build`
+`$ cd build`
+`$ cmake -DLIBHDFS_INCLUDE_DIR=/usr/local/include/hdfs -DLIBHDFS_LIBRARY=/usr/local/lib/libhdfs3.so ..`
+
+
 ## Running the benchmarks
 
 ### Clearing the File System Cache

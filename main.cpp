@@ -11,6 +11,13 @@
 
 #ifdef LIBHDFS_FOUND
 #include <hdfs.h>
+
+#ifdef ELASTIC_BYTE_BUFFER_POOL_CLASS
+#define LIBHDFS_JNI
+#else
+#define LIBHDFS3
+#endif
+
 #endif
 
 // On Mac OS X clock_gettime is not available
@@ -129,7 +136,7 @@ uint64_t use_data(void *data, size_t length) {
     return 0;
 }
 
-#ifdef LIBHDFS_HDFS_H
+#ifdef LIBHDFS_JNI
 bool read_hdfs_zcr(hdfsFS fs, hdfsFile file, hdfsFileInfo *fileInfo) {
     struct hadoopRzOptions *rzOptions;
     struct hadoopRzBuffer *rzBuffer;
@@ -173,14 +180,19 @@ bool read_hdfs_zcr(hdfsFS fs, hdfsFile file, hdfsFileInfo *fileInfo) {
 
     return true;
 }
+#endif
 
+#ifdef LIBHDFS_FOUND
 bool read_hdfs_standard(hdfsFS fs, hdfsFile file, hdfsFileInfo *fileInfo) {
     char *buffer = (char *) malloc(sizeof(char) * options.buffer_size);
     tSize total_read = 0, read = 0;
     do {
+#ifdef LIBHDFS_JNI
         if(options.use_hdfs_pread) {
             read = hdfsPread(fs, file, total_read, buffer, options.buffer_size);
-        } else {
+        } else
+#endif
+        {
             read = hdfsRead(fs, file, buffer, options.buffer_size);
         }
 
@@ -369,16 +381,20 @@ int main(int argc, char *argv[]) {
         hdfsBuilderConfSetStr(hdfsBuilder, "dfs.client.read.shortcircuit.streams.cache.size", buffer_size_s);
 
         hdfsFS fs = hdfsBuilderConnect(hdfsBuilder);
+
         hdfsFileInfo *fileInfo = hdfsGetPathInfo(fs, options.path);
+        file_size = fileInfo[0].mSize;
 
         hdfsFile file = hdfsOpenFile(fs, options.path, O_RDONLY, options.buffer_size, 0, 0);
         EXPECT_NONZERO(file, "hdfsOpenFile")
 
-        // measure latency to open the file
+        // measure latency
         clock_gettime(CLOCK_MONOTONIC, &openedTime);
 
         // Try to perform a zero-copy read, if it fails
-        // fall back to standard read
+        // fall back to standard read. If we use libhdfs3 we can only
+        // perform a standard read.
+#ifdef LIBHDFS_JNI
         if (options.force_hdfs_standard_read) {
             printf("Using standard read\n");
             read_hdfs_standard(fs, file, fileInfo);
@@ -386,13 +402,18 @@ int main(int argc, char *argv[]) {
             printf("Falling back to standard read\n");
             read_hdfs_standard(fs, file, fileInfo);
         }
+#else
+        read_hdfs_standard(fs, file, fileInfo);
+#endif
 
-        file_size = fileInfo[0].mSize;
 
+
+#ifdef LIBHDFS_JNI
         struct hdfsReadStatistics *stats;
         hdfsFileGetReadStatistics(file, &stats);
         printf("Statistics:\n\tTotal: %lu\n\tLocal: %lu\n\tShort Circuit: %lu\n\tZero Copy Read: %lu\n", stats->totalBytesRead, stats->totalLocalBytesRead, stats->totalShortCircuitBytesRead, stats->totalZeroCopyBytesRead);
         hdfsFileFreeReadStatistics(stats);
+#endif
 
         hdfsCloseFile(fs, file);
 #else
@@ -416,10 +437,11 @@ int main(int argc, char *argv[]) {
     // Measure the final time
     clock_gettime(CLOCK_MONOTONIC, &endTime);
     struct timespec time = timespec_diff(openedTime, endTime);
+    struct timespec open_time = timespec_diff(startTime, openedTime);
     double speed = (((double) file_size) / ((double) time.tv_sec + time.tv_nsec / 1000000000.0)) / (1024.0 * 1024.0);
 
     // Print some text, some parseable results
-    printf("Read %f MB with %lfMiB/s\n", ((double) file_size) / (1024.0 * 1024.0), speed);
+    printf("Read %f MB with %lfMiB/s (Latency: %fs)\n", ((double) file_size) / (1024.0 * 1024.0), speed, ((double) (open_time.tv_sec + open_time.tv_nsec/1000000000.0)));
     printf("%f\n", speed);
 
     return 0;
