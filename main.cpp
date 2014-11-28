@@ -90,6 +90,9 @@ struct {
     int use_readahead = false;
     int use_ioprio = false;
 
+    // if the command is given, it should be used to flush the cache
+    const char *flush_cache = NULL;
+
     benchmark_t benchmark;
 } options;
 
@@ -126,7 +129,7 @@ uint64_t use_data(void *data, size_t length) {
             exit(1);
         }
 
-        // TODO shouldbe free'd
+        // TODO should be free'd
     }
 
     for(size_t i=0; i<length; i+=options.buffer_size) {
@@ -299,9 +302,10 @@ void parse_options(int argc, char *argv[]) {
             {"use-readahead",       no_argument, &options.use_readahead, 1},
             {"use-ioprio",          no_argument, &options.use_ioprio, 1},
 #endif
-            {"file",    optional_argument, 0, 'f'},
-            {"buffer",  optional_argument, 0, 'b'},
-            {"type",    required_argument, 0, 't'},
+            {"file",        optional_argument, 0, 'f'},
+            {"buffer",      optional_argument, 0, 'b'},
+            {"type",        required_argument, 0, 't'},
+            {"flush-cache", optional_argument, 0, 'c'},
             {0, 0, 0, 0}
     };
 
@@ -316,6 +320,9 @@ void parse_options(int argc, char *argv[]) {
                 break;
             case 'b':
                 options.buffer_size = atoi(optarg);
+                break;
+            case 'c':
+                options.flush_cache = optarg;
                 break;
             case 't':
                 if(strcmp(optarg, "hdfs") == 0) {
@@ -357,8 +364,12 @@ int main(int argc, char *argv[]) {
     if(getuid() == 0) {
         system("sudo sync; sudo echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null");
         printf("Cleared filesystem cache\n");
-    }
+    } else
 #endif
+    if(options.flush_cache != NULL) {
+        system(options.flush_cache);
+        printf("Cleared filesystem cache\n");
+    }
 
     struct timespec startTime, openedTime, endTime;
     clock_gettime(CLOCK_MONOTONIC, &startTime);
